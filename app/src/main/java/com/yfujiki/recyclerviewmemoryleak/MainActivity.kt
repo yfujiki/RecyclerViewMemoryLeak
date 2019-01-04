@@ -9,4 +9,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
     }
+
+    protected fun finalize() {
+        println("Activity was reclaimed")
+    }
 }
