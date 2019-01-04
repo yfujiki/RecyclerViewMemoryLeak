@@ -4,7 +4,10 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
+import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.rxkotlin.plusAssign
 import kotlinx.android.synthetic.main.view_holder_main.view.*
+import java.lang.ref.WeakReference
 
 class MainRecyclerViewAdapter: RecyclerView.Adapter<MainRecyclerViewHolder>() {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MainRecyclerViewHolder {
@@ -22,4 +25,16 @@ class MainRecyclerViewAdapter: RecyclerView.Adapter<MainRecyclerViewHolder>() {
 }
 
 class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) {
+    val disposable = CompositeDisposable()
+
+    init {
+        disposable += AppState.stateSubject.subscribe {
+            itemView.textView.text = "Status : $it"
+            someMethod()
+        }
+    }
+
+    fun someMethod() {
+        println("Doing nothing...")
+    }
 }
