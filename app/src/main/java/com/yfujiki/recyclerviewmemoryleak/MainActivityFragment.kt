@@ -25,7 +25,7 @@ class MainActivityFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        recyclerView.layoutManager = LinearLayoutManager(activity)
         recyclerView.adapter = adapter
+        recyclerView.layoutManager = LinearLayoutManager(activity!!)
     }
 }
