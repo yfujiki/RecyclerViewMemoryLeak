@@ -10,6 +10,8 @@ import kotlinx.android.synthetic.main.fragment_activity_main.*
 
 class MainActivityFragment : Fragment() {
 
+    val adapter = MainRecyclerViewAdapter()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -20,10 +22,15 @@ class MainActivityFragment : Fragment() {
         return inflater.inflate(R.layout.fragment_activity_main, container, false)
     }
 
+    override fun onDestroyView() {
+        super.onDestroyView()
+        recyclerView.adapter = null
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
         recyclerView.layoutManager = LinearLayoutManager(activity!!)
-        recyclerView.adapter = MainRecyclerViewAdapter()
+        recyclerView.adapter = adapter
     }
 }
