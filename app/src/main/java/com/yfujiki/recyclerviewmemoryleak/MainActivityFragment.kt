@@ -10,11 +10,12 @@ import kotlinx.android.synthetic.main.fragment_activity_main.*
 
 class MainActivityFragment : Fragment() {
 
-    val adapter = MainRecyclerViewAdapter()
+    private lateinit var adapter: MainRecyclerViewAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        adapter = MainRecyclerViewAdapter((activity as MainActivity).disposable)
         retainInstance = true
     }
 

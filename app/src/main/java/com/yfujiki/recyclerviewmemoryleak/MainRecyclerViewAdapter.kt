@@ -7,12 +7,11 @@ import androidx.recyclerview.widget.RecyclerView
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.rxkotlin.plusAssign
 import kotlinx.android.synthetic.main.view_holder_main.view.*
-import java.lang.ref.WeakReference
 
-class MainRecyclerViewAdapter: RecyclerView.Adapter<MainRecyclerViewHolder>() {
+class MainRecyclerViewAdapter(val activityDisposable: CompositeDisposable) : RecyclerView.Adapter<MainRecyclerViewHolder>() {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MainRecyclerViewHolder {
         val itemView = LayoutInflater.from(parent.context).inflate(R.layout.view_holder_main, parent, false)
-        return MainRecyclerViewHolder(itemView)
+        return MainRecyclerViewHolder(itemView, activityDisposable)
     }
 
     override fun getItemCount(): Int {
@@ -24,17 +23,15 @@ class MainRecyclerViewAdapter: RecyclerView.Adapter<MainRecyclerViewHolder>() {
     }
 }
 
-class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) {
+class MainRecyclerViewHolder(itemView: View, val activityDisposable: CompositeDisposable): RecyclerView.ViewHolder(itemView) {
     val disposable = CompositeDisposable()
 
     init {
-        val weakItemView = WeakReference<View>(itemView)
-        val weakSelf = WeakReference<MainRecyclerViewHolder>(this)
-
         disposable += AppState.stateSubject.subscribe {
-            weakItemView.get()?.textView?.text = "Status : $it"
-            weakSelf.get()?.someMethod()
+            itemView.textView.text = "Status : $it"
+            someMethod()
         }
+        activityDisposable.add(disposable)
     }
 
     fun someMethod() {
@@ -42,9 +39,6 @@ class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) 
     }
 
     protected fun finalize() {
-        if (!disposable.isDisposed()) {
-            disposable.dispose()
-        }
         println("MainRecyclerViewHolder reclaimed")
     }
 }
