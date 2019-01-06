@@ -114,7 +114,7 @@ This implies following hidden reference from `ViewHolder` to `Activity`.
 
 ### Solution 1
 
-Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to note is that you have to "weak reference" `ViewHolder` from the subscriber block. Otherwise, `ViewHolder.finalize()` is never called because subscriber keeps reference to the `ViewHolder` instance. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fx-rx-observer-memory-leak-1)
+Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to note is that you have to "weak reference" `ViewHolder` from the subscriber block. Otherwise, `ViewHolder.finalize()` is never called because subscriber keeps reference to the `ViewHolder` instance. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-rx-observer-memory-leak-1)
 
 ```
      val disposable = CompositeDisposable()
@@ -146,7 +146,7 @@ Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to n
 However, this is not perfect because you never know when `finalize()` will be called. Even after rotation, when these `ViewHolder`s were discarded, `finalize()` will not be called until the next GC. So, technically it is possible that the `ViewHolder` instances in the memory keeps receiving Rx events until the next GC, even after they are not visible on the view.
 
 ### Solution 2
-Trickle down `disposable` instance from Activity and use that `disposable` for `ViewHolder`'s subscriptions. This way, you can guarantee that the subscription block is canceled when `Activity` dies, regardless of the timing of next GC. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fx-rx-observer-memory-leak-2)
+Trickle down `disposable` instance from Activity and use that `disposable` for `ViewHolder`'s subscriptions. This way, you can guarantee that the subscription block is canceled when `Activity` dies, regardless of the timing of next GC. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-rx-observer-memory-leak-2)
 
 Change in MainActivity:
 

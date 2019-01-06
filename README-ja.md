@@ -117,7 +117,7 @@ class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) 
 
 ### 解決法 1
 
-`disposable` を `ViewHolder.finalize()` で `dispose` します。この時気をつけないといけないのは、subscriber ブロックから `ViewHolder` への参照は WeakReference で行なわないといけないということです。そうしないと、subscriber ブロックからの参照が生きているので `ViewHolder.finalize()` が永久に呼ばれず、`dispose` も呼ばれないことになってしまいます。[コードベース](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fx-rx-observer-memory-leak-1)
+`disposable` を `ViewHolder.finalize()` で `dispose` します。この時気をつけないといけないのは、subscriber ブロックから `ViewHolder` への参照は WeakReference で行なわないといけないということです。そうしないと、subscriber ブロックからの参照が生きているので `ViewHolder.finalize()` が永久に呼ばれず、`dispose` も呼ばれないことになってしまいます。[コードベース](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-rx-observer-memory-leak-1)
 
 ```
      val disposable = CompositeDisposable()
@@ -149,7 +149,7 @@ class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) 
 この方法には `finalize()` がいつ呼ばれるか分からない、という問題があります。回転が起きた後 `ViewHolder` のインスタンスが画面からはデタッチされた後でも、GC が呼ばれるまで `finalize()` は呼ばれません。なので、GC が起きるまでの間、画面に表示されない `ViewHolder` インスタンスがゾンビのように生きていて Rx イベントを受け続けるという状態が起こり得ます。
 
 ### 解決法 2
-`Activity` で `Disposable` インスタンスを生成し、パラメータとして `ViewHolder` まで受け渡し、`ViewHolder` ではそれを使う、という方法です。これで、回転が起きて `Activity` が死んだ時には、GC を待たずに subscriber ブロックも dispose することができます。[コードベース](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fx-rx-observer-memory-leak-2)
+`Activity` で `Disposable` インスタンスを生成し、パラメータとして `ViewHolder` まで受け渡し、`ViewHolder` ではそれを使う、という方法です。これで、回転が起きて `Activity` が死んだ時には、GC を待たずに subscriber ブロックも dispose することができます。[コードベース](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-rx-observer-memory-leak-2)
 
 MainActivity:
 
