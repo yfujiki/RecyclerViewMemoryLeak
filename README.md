@@ -8,17 +8,17 @@ The experiment app has the following very basic structure.
 
 ![Structure](docs/images/Structure.png)
 
-One `Fragment` shows `RecyclerView`, whose `adapter` is providing custom `ViewHolder`s. One thing that may be deviating from standard(!?) such structure is that the `Fragment` is keeping the reference to the `adapter`, so that `adapter` has longer lifetime than the `Activity`. It is a sensible thing to do when you don't want to preserve the state in the adapter even after rotation.
+One `Fragment` shows `RecyclerView`, whose `adapter` is providing custom `ViewHolder`s. One thing that may be deviating from standard(!?) such structure is that the `Fragment` is keeping the reference to the `adapter`, so that `adapter` has longer lifetime than the `Activity`. It is a sensible thing to do when you want to preserve the state in the adapter even after rotation.
 
-However, this very thought is going to cause memory leak with [the naive implementation](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/adapter-memory-leak).
+However, this very thought seems to cause memory leak with [the naive implementation](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/adapter-memory-leak).
 
-[LeakCanary](https://github.com/square/leakcanary) will report following traversal toward the `Activity` instance.
+[LeakCanary](https://github.com/square/leakcanary) reports the following traversal toward the `Activity` instance.
 
 ![Adapter Leak](docs/images/Adapter.png)
 
 This pretty much means that as long as you preserve the reference to `RecyclerView.mAdapter` from GC root, then `Activity` is going to leak.
 
-I wasn't aware, but as I can see from the leak report, apparently there is a hidden reference from `RecyclerView.Adapter` to `Activity` through `RecyclerView`.
+I wasn't aware, but as I can see from the leak report, apparently there is a hidden reference from `RecyclerView.Adapter` to `Activity` through `RecyclerView`. (The dashed lines below indicates the hidden reference.)
 
 ![Hidden Path from RecyclerView.Adapter to Activity](docs/images/structure-actual-for-adapter.png)
 
@@ -77,17 +77,17 @@ class MainActivityFragment : Fragment() {
 
 This is very odd I find, because you are resetting `recyclerView.adapter` in `onViewCreated` later anyway, and thus you will lose the reference to the `adapter` sooner or later. I don't really see what difference it makes other than the timing when `adapter` is freed. But [this technique introduced in this SO post](https://stackoverflow.com/questions/35520946/leak-canary-recyclerview-leaking-madapter/46957469#46957469) certainly works. 
 
-And this approach does not involve the drawback to disallow `adapter` to have any temporary state. (I know probably from modern architecture stand point, it is favored to configure `adapter` as stateless anyway, but sometimes it can be handy to let it have a small temporary state.) [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-adapter-memory-leak-2)
+And this approach does not involve the drawback to disallow `adapter` to have any temporary state. (I know probably from modern architecture stand point, it is favored to configure `adapter` as stateless anyway, but sometimes it is handy to let it have a small temporary state.) [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-adapter-memory-leak-2)
 
 ### Summary
 
 My vote at this point is for Solution 2, since it does not have behavioral drawback. And one thing I want to add is that `ViewPager` doesn't cause this memory leak with the same structure. (`ViewPager` probably doesn't have reference to the underlying `Activity` to cause circular reference?)
 
-## When you leave `disposable`s in `RecyclerView.ViewHolder`. (It's a matter of __when__ we can dispose those `disposable`s)
+## When you use Rx `disposable` in `RecyclerView.ViewHolder` and don't dispose. 
 
 ### Memory Leak
 
-This is something that happens with general mistake of leaving `Disposable` instances undisposed, not a very specific issue in `RecyclerView`. However, when you have `disposables` in `RecyclerView.ViewHolder`, I found it extremely difficult to decide when it is good to dispose these. 
+This is something that happens with general mistake of leaving `Disposable` instances undisposed, not a very specific issue in `RecyclerView`. However, when you have `disposables` in `RecyclerView.ViewHolder`, I found it extremely difficult to decide when it is good to dispose these, and it deserves thought specific to `RecyclerView`.
 
 ```
 class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) {
@@ -106,7 +106,7 @@ class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) 
 }
 ```
 
-Here in this [code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/rx-observer-memory-leak), the custom `ViewHolder` instance is listening to the state change from static `subject`. Here, obviously we are not disposing the disposable, so it will leak the subscriber block. But not only that, because the subscriber block has reference to the `ViewHolder`, the `ViewHolder` leaks too. And apparently, `ViewHolder` has reference to the underlying `Activity` as well, `Activity` leaks eventually. The leak traversal from LeakCanary looks like this : 
+Here in this [code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/rx-observer-memory-leak), the custom `ViewHolder` instance is listening to the state change from static Rx `subject`. Here, obviously we are not disposing the disposable, so it will leak the subscriber block. But not only that, because the subscriber block has a reference to the `ViewHolder`, the `ViewHolder` leaks too. And apparently, `ViewHolder` has a reference to the underlying `Activity` as well and `Activity` leaks eventually. The leak traversal from LeakCanary looks like this : 
 
 ![Rx Observable Leak](docs/images/RxSubscriber.png)
 
@@ -221,3 +221,13 @@ Solution 2 is good under the assumption that `ViewHolder`'s lifetime is the same
 ### Summary 
 
 If the application doesn't involve Soft Keyboard on that screen, and if the application keeps the `Fragment` of the `RecyclerView` for the lifetime of `Activity`, then we should use Solution 2. If the application switches the `Fragment` of the `RecyclerView` inside the `Activity`, you can use Solution 1 to compensate for Solution 2. Otherwise, we should not use Rx in the `ViewHolder`. That's my conclusion for this case.
+
+## Overall Summary
+
+- The sample provides the solution when `Activity` is leaking due to `RecyclerView.Adapter`'s lifetime being longer than the `Activity`. 
+- The sample provides the solution under restricted conditions and thought about the case where `Activity` leaks due to the usage of Rx in `RecyclerView.ViewHolder`.
+
+Although I wasn't aware, LeakCanary tells me that there is a hidden reference like this from `RecyclerView.Adapter`/`RecyclerView.ViewHolder` to `Activity`.
+
+![Hidden references from RecyclerView => Activity](docs/images/Structure-actual.png)
+
