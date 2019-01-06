@@ -75,9 +75,7 @@ class MainActivityFragment : Fragment() {
 }
 ```
 
-This is very odd I find, because you are resetting `recyclerView.adapter` in `onViewCreated` later anyway, and thus you will lose the reference to the `adapter` sooner or later. I don't really see what difference it makes other than the timing when `adapter` is freed. But [this technique introduced in this SO post](https://stackoverflow.com/questions/35520946/leak-canary-recyclerview-leaking-madapter/46957469#46957469) certainly works. 
-
-And this approach does not involve the drawback to disallow `adapter` to have any temporary state. (I know probably from modern architecture stand point, it is favored to configure `adapter` as stateless anyway, but sometimes it is handy to let it have a small temporary state.) [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-adapter-memory-leak-2)
+Have to read Android's code for detail, but I think Android eliminates the reference from `adapter` to `RecyclerView` when you null out the reference from `RecyclerView` to `adapter`, thus eliminating the circular reference that eventually reaches `Activity`. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-adapter-memory-leak-2)
 
 ### Summary
 
@@ -116,7 +114,7 @@ This implies following hidden reference from `ViewHolder` to `Activity`.
 
 ### Solution 1
 
-Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to note is that you have to "weak reference" `ViewHolder` from the subscriber block. Otherwise, `ViewHolder.finalize()` is never called because subscriber keeps reference to the `ViewHolder` instance.
+Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to note is that you have to "weak reference" `ViewHolder` from the subscriber block. Otherwise, `ViewHolder.finalize()` is never called because subscriber keeps reference to the `ViewHolder` instance. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fx-rx-observer-memory-leak-1)
 
 ```
      val disposable = CompositeDisposable()
@@ -148,7 +146,7 @@ Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to n
 However, this is not perfect because you never know when `finalize()` will be called. Even after rotation, when these `ViewHolder`s were discarded, `finalize()` will not be called until the next GC. So, technically it is possible that the `ViewHolder` instances in the memory keeps receiving Rx events until the next GC, even after they are not visible on the view.
 
 ### Solution 2
-Trickle down `disposable` instance from Activity and use that `disposable` for `ViewHolder`'s subscriptions. This way, you can guarantee that the subscription block is canceled when `Activity` dies, regardless of the timing of next GC.
+Trickle down `disposable` instance from Activity and use that `disposable` for `ViewHolder`'s subscriptions. This way, you can guarantee that the subscription block is canceled when `Activity` dies, regardless of the timing of next GC. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fx-rx-observer-memory-leak-2)
 
 Change in MainActivity:
 
