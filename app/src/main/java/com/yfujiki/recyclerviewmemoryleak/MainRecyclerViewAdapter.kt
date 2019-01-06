@@ -39,6 +39,10 @@ class MainRecyclerViewHolder(itemView: View, val activityDisposable: CompositeDi
     }
 
     protected fun finalize() {
+        if (!disposable.isDisposed) {
+            disposable.dispose()
+        }
+
         println("MainRecyclerViewHolder reclaimed")
     }
 }
