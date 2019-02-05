@@ -1,3 +1,7 @@
+![platform](https://img.shields.io/badge/platform-Android-blue.svg)
+![language](https://img.shields.io/badge/language-Kotlin1.3-green.svg)
+![twitter](https://img.shields.io/badge/twitter-@yfujiki-blue.svg)
+
 ## Preface
 This article is mostly meant for novis to mid level Android programmers, who haven't really digged into [LeakCanary](https://github.com/square/leakcanary) yet. I myself used it for the first time recently after delving into Android development for a year. And I am pleasently surprised how powerful this tool is. This is definitely a must-include tool in every project. At the same time, I was how Android maintains references under the hood for RecyclerViews. With naive expectation that RecyclerView itself should be avoiding circular references, you can easily fall into a trap of memory leaks. (And that's exactly the kind of reason that Square guys implemented [LeakCanary](https://github.com/square/leakcanary) and everybody should use it)
 
