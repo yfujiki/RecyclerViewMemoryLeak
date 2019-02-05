@@ -3,7 +3,7 @@
 ![twitter](https://img.shields.io/badge/twitter-@yfujiki-blue.svg)
 
 ## Preface
-This article is mostly meant for novis to mid level Android programmers, who haven't really digged into [LeakCanary](https://github.com/square/leakcanary) yet. I myself used it for the first time recently after delving into Android development for a year. And I am pleasantly surprised how powerful this tool is. This is definitely a must-include tool in every project. At the same time, I was surprised how Android maintains references under the hood for `RecyclerViews`. With naive expectation that `RecyclerView` itself should avoid circular references, you can easily fall into a trap of memory leaks. (And that's exactly the kind of reason that Square guys implemented [LeakCanary](https://github.com/square/leakcanary) and everybody should use it)
+This repository is mostly meant for novis to mid level Android programmers, who haven't really digged into [LeakCanary](https://github.com/square/leakcanary) yet. I myself used it for the first time recently after delving into Android development for a year. And I am pleasantly surprised how powerful this tool is. This is definitely a must-include tool in every project. At the same time, I was surprised how Android maintains references under the hood for `RecyclerViews`. With naive expectation that `RecyclerView` itself should avoid circular references, you can easily fall into a trap of memory leaks. (And that's exactly the kind of reason that Square guys implemented [LeakCanary](https://github.com/square/leakcanary) and everybody should use it)
 
 ## How to use LeakCanary
 It's pretty simple to use LeakCanary. As instructed in the [README section](https://github.com/square/leakcanary#getting-started), you just need to **1. describe dependency in gradle** and **2. write a few lines in your `Application` subclass**. And then LeakCanary will alert you of the memory leak in your __debug build__.
@@ -270,7 +270,7 @@ I don't come up with a situation where `ViewHolder` instance can outlive parent 
 
 My lament is that our life would be so much easier if `ViewHolder` itself had a life cycle callback like `onDestroy`...
 
-## Summary
+## Summary
 
 - Memory leak can happen when `RecyclerView.Adapter` outlives `Activity`. But there is a solution for that!
 - Memory leak can happen when you use Rx in `RecyclerView.ViewHolder`. But there is a solution for that!
