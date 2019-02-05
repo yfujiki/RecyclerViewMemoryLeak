@@ -1,32 +1,47 @@
-# RecyclerViewMemoryLeak
-Experiment to see the condition when some memory leak happens with `RecyclerView`
+## Preface
+This article is mostly meant for novis to mid level Android programmers, who haven't really digged into [LeakCanary](https://github.com/square/leakcanary) yet. I myself used it for the first time recently after delving into Android development for a year. And I am pleasently surprised how powerful this tool is. This is definitely a must-include tool in every project. At the same time, I was how Android maintains references under the hood for RecyclerViews. With naive expectation that RecyclerView itself should be avoiding circular references, you can easily fall into a trap of memory leaks. (And that's exactly the kind of reason that Square guys implemented [LeakCanary](https://github.com/square/leakcanary) and everybody should use it)
 
-## When `RecyclerView.adapter`'s lifetime is longer than `Activity`
+## How to use LeakCanary
+It's pretty simple to use LeakCanary. As instructed in the [README](https://github.com/square/leakcanary#getting-started), you just need to describe dependency in gradle and write a few lines in your `Application` subclass. And as it also describes, LeakCanary will alert you of the memory leak in your __debug build only__.
 
-### Memory Leak
-The experiment app has the following very basic structure. 
+However, as straight-forward as it sounds, there was one pitfall I got into. If you are like me and prefers to press _Debug_ button instead of _Run_ button on Android Studio, LeakCanary doesn't run while you are debugging. You have to stop the debugging, and start the installed debug build from the launcher.
 
-![Structure](docs/images/Structure.png)
+I have summarized this flow into a video, if it helps :
 
-One `Fragment` shows `RecyclerView`, whose `adapter` is providing custom `ViewHolder`s. One thing that may be deviating from standard(!?) such structure is that the `Fragment` is keeping the reference to the `adapter`, so that `adapter` has longer lifetime than the `Activity`. It is a sensible thing to do when you want to preserve the state in the adapter even after rotation.
+[![How to use LeakCanary](http://img.youtube.com/vi/RiYGSjguI9k/0.jpg)](http://www.youtube.com/watch?v=RiYGSjguI9k "How to use LeakCanary ((after you have finished implementation)")
 
-However, this very thought seems to cause memory leak with [the naive implementation](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/adapter-memory-leak).
+## Two cases you can easily make memory leak around RecyclerView
 
-[LeakCanary](https://github.com/square/leakcanary) reports the following traversal toward the `Activity` instance.
+I have put two cases of memory leaks I encountered into a [sample program](https://github.com/yfujiki/RecyclerViewMemoryLeak). All codes are written in Kotlin.
 
-![Adapter Leak](docs/images/Adapter.png)
+### Case 1: `RecyclerView.adapter` outlives `Activity`.
 
-This pretty much means that as long as you preserve the reference to `RecyclerView.mAdapter` from GC root, then `Activity` is going to leak.
+#### Memory Leak: 
+This sample program follows very standard structure as follows.
 
-I wasn't aware, but as I can see from the leak report, apparently there is a hidden reference from `RecyclerView.Adapter` to `Activity` through `RecyclerView`. (The dashed lines below indicates the hidden reference.)
+![Structure.png](./Resources/Structure.png)
 
-![Hidden Path from RecyclerView.Adapter to Activity](docs/images/structure-actual-for-adapter.png)
+`Fragment` shows `RecyclerView` and it's `adapter` provides custom `Viewholder`s. One thing that deviates standard(!?) structure is that the `Fragment` keeps reference to the `adapter` of the `RecyclerView`. This reference is meant to reuse `adapter` even after `Activity` is refreshed due to rotation etc. We are showing `RecyclerView` on top of the `Fragment`, so I think it is a sensible option to match the lifetime of `RecyclerView`'s `adapter` to the one of the `Fragment` as well.
 
-### Solution 1
+This structure looks safe in the perspective of memory leak because there is no circular references. However, it causes a memory leak indeed.
 
-Change the lifetime of `adapter` to be the same as `Activity`. 
+The object reference path provided by [LeakCanary](https://github.com/square/leakcanary) will look like this.
 
-```
+![Adapter.png](https://qiita-image-store.s3.amazonaws.com/0/108030/343ca8a3-ed73-f31e-d21b-a419d9100872.png)
+
+To my surprise, this diagram tells me that `RecyclerView.mAdapter` holds an indirect reference to `MainActivity` through `RecyclerView.mContext`. This is not a reference we made ourselves. This is a "hidden" reference, if we may call it. 
+
+So, the actual structure with this "hidden" reference (indicated by the dashed lines) is like the next diagram.
+
+![structure-actual-for-adapter.png](Resources/structure-actual-for-adapter.png)
+
+You can see there is a beautiful circular reference from `MainFragment` => `MainRecyclerViewAdapter` => `RecyclerView` => `MainActivity` => `MainFragment` and so on... Rotation happens, and `MainActivity` gets recreated, but since `MainFragment` still lives after rotation and keeps indirect reference to the old `MainActivity`, the old `MainActivity` will never reclaimed by GC and leaks.
+
+#### Solution 1
+
+A simple solution is to shorten the lifetime of `adapter` to match with the one of the `Activity`.
+
+```kotlin
 class MainActivityFragment : Fragment() {
     // Discard permanent reference to the adapter
 -   val adapter = MainRecyclerViewAdapter()
@@ -47,47 +62,63 @@ class MainActivityFragment : Fragment() {
 } 
 ```
 
-This approach makes sense, but it has a drawback that you cannot store any temporary state in the `adapter`. When rotation happens, you need to reconstruct that state from somewhere else, because `adapter` is created fresh at the time. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-adapter-memory-leak-1)
+Every time when rotation happens, you will ditch `adapter` that holds an indirect reference to the old `Activity`, so that the `Activity` will not have a zombie reference. 
 
-### Solution 2
+In terms of structure, we don't have the circular reference we had before, because there is no link from `Fragment` to `adapter` now. 
 
-Just set `recyclerView.adapter = null` in `onDestroyView` callback.
+![structure-after-removing-adapter.png](Resources/structure-after-removing-adapter-reference.png)
 
-```
+(You may think there still is a circular reference from `MainActivity` => `MainFragment` => `RecyclerView` => `MainActivity`. However, the `RecyclerView` is always recreated after rotation and reference from `MainFragment` to the old `RecyclerView` through Android-Kotlin extension never stays after rotation. That's how the Android works.)
+
+The cons of this approach is that you cannot save the temporary state in the `adapter`, because the `adapter` is initialized at every rotation. We have to save the temporary state somewhere else, and let the `adapter` to fetch the state after every initialization.
+
+#### Solution 2
+
+Another simple solution is to call `recyclerView.adapter = null` from `onDestroyView`.
+
+```kotlin
 class MainActivityFragment : Fragment() {
     // Discard permanent reference to the adapter
--   val adapter = MainRecyclerViewAdapter()
--	
+    val adapter = MainRecyclerViewAdapter()
+	
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         return inflater.inflate(R.layout.fragment_activity_main, container, false)
     }
  
--   override fun onDestroyView() {
--       super.onDestroyView()
--       recyclerView.adapter = null
--   }
--
++   override fun onDestroyView() {
++       super.onDestroyView()
++       // Note that this recyclerView is an old one
++       // and different instance from the one in onViewCreated.
++       recyclerView.adapter = null
++   }
++
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState) 
-        recyclerView.adapter = adapter
+        // Note that this recyclerView is a new one
+        // and different instance from the one in onDestroyView.
+        recyclerView.adapter = adapter 
     }
 }
 ```
 
-Have to read Android's code for detail, but I think Android eliminates the reference from `adapter` to `RecyclerView` when you null out the reference from `RecyclerView` to `adapter`, thus eliminating the circular reference that eventually reaches `Activity`. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-adapter-memory-leak-2)
+I need to read Android code for detail, but I imagine that when you set `RecyclerView.adapter = null`, Android nulls out the reference from `adapter` to the `RecyclerView` as well, thereby eliminating the circular reference.
 
-### Summary
+![structure-after-nullouting-adapter.png](Resources/structure-after-nullouting-adapter.png)
 
-My vote at this point is for Solution 2, since it does not have behavioral drawback. And one thing I want to add is that `ViewPager` doesn't cause this memory leak with the same structure. (`ViewPager` probably doesn't have reference to the underlying `Activity` to cause circular reference?)
+### Summary of case 1
 
-## When you use Rx `disposable` in `RecyclerView.ViewHolder` and don't dispose. 
+Even though I think solution 1 is by-the-book approach, note that it has a con that you can not let `adapter` to hold temporary status.  If you need `adapter` to maintain temporary status, then probably better to pick solution 2.
 
-### Memory Leak
+Another interesting point I want to note is that this type of memory leak does not occur with `ViewPager`. The way the `ViewPager` set "hidden" references should be a bit different from how `RecyclerView` does it.
 
-This is something that happens with general mistake of leaving `Disposable` instances undisposed, not a very specific issue in `RecyclerView`. However, when you have `disposables` in `RecyclerView.ViewHolder`, I found it extremely difficult to decide when it is good to dispose these, and it deserves thought specific to `RecyclerView`.
+## Case 2 : When you created Rx `disposable` in `RecyclerView.ViewHolder`, but you didn't/couldn't dispose it
 
-```
+### Memory Leak:
+
+This case actually belongs to Rx domain rather than `RecyclerView` domain, and it is a trivial case in that it happens when you failed to dispose `Disposable` properly. But I found it not very trivial as of __when__ we should dispose `Disposable`, and that perspective is specific to the `RecyclerView`.
+
+```kotlin
 class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) {
     val disposable = CompositeDisposable()
 
@@ -104,19 +135,22 @@ class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) 
 }
 ```
 
-Here in this [code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/rx-observer-memory-leak), the custom `ViewHolder` instance is listening to the state change from static Rx `subject`. Here, obviously we are not disposing the disposable, so it will leak the subscriber block. But not only that, because the subscriber block has a reference to the `ViewHolder`, the `ViewHolder` leaks too. And apparently, `ViewHolder` has a reference to the underlying `Activity` as well and `Activity` leaks eventually. The leak traversal from LeakCanary looks like this : 
+A custom `ViewHolder` instance is subscribing to static Rx `subject`. Apparently in this case the subscription block leaks because we are not disposing the `disposable`. However, in addition to that, `ViewHolder` leaks asw well because the subscription block references `ViewHolder`. And to my surprise, the `ViewHolder` has a "hidden" indirect reference to `Activity`, and the `Activity` leaks too. (It surprised me quite a bit in this case especially because we are placing `RecyclerView` on a `Fragment`.)
 
-![Rx Observable Leak](docs/images/RxSubscriber.png)
+The object reference path provided by LeakCanary would look like this.
 
-This implies following hidden reference from `ViewHolder` to `Activity`.
+![RxSubscriber.png](Resources/RxSubscriber.png)
 
-![Hidden path from RecyclerView.ViewHolder to Activity](docs/images/Structure-actual-for-view-holder.png)
+You can see that there is a reference from `MainRecyclerViewHolder` to `MainActivity`.
+
+![Structure-actual-for-view-holder.png](Resources/Structure-actual-for-view-holder.png)
+
 
 ### Solution 1
 
-Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to note is that you have to "weak reference" `ViewHolder` from the subscriber block. Otherwise, `ViewHolder.finalize()` is never called because subscriber keeps reference to the `ViewHolder` instance. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-rx-observer-memory-leak-1)
+We can dispose `disposable` in `ViewHolder.finalize()`. One thing you have to note in this case is that you should reference `ViewHolder` instance as a __weak__ reference. Otherwise, the subscription block's reference keeps the `ViewHolder` instance alive, and `ViewHolder.finalize()` is never called. As a result, `disposable.dispose()` is never called as well.
 
-```
+```kotlin
      val disposable = CompositeDisposable()
  
      init {
@@ -132,7 +166,7 @@ Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to n
      }
  
      fun someMethod() {
-         println("Doing nothing...")
+         println("Doing something...")
      }
 +
 +    protected fun finalize() {
@@ -143,14 +177,17 @@ Dispose `disposable`s in the `finalize()` method of `ViewHolder`. One thing to n
 +    }
 ```
 
-However, this is not perfect because you never know when `finalize()` will be called. Even after rotation, when these `ViewHolder`s were discarded, `finalize()` will not be called until the next GC. So, technically it is possible that the `ViewHolder` instances in the memory keeps receiving Rx events until the next GC, even after they are not visible on the view.
+This solution is probably an anti-pattern. Resorting to implementation in `finalize()` is always frowned upon, because you never know when it will be called. After `ViewHolder` instance was detached from the window after rotation, `finalize()` will not be called until the next GC. I haven't observed this, but it is theoretically possible that the detached `ViewHolder`s keeps receiving Rx events even though they are considered "dead" from application's perspective.
+
+But you can save this as a last resort. The "dead" instances will be claimed eventually for sure.
 
 ### Solution 2
-Trickle down `disposable` instance from Activity and use that `disposable` for `ViewHolder`'s subscriptions. This way, you can guarantee that the subscription block is canceled when `Activity` dies, regardless of the timing of next GC. [Code base](https://github.com/yfujiki/RecyclerViewMemoryLeak/tree/fix-rx-observer-memory-leak-2)
 
-Change in MainActivity:
+We can create `Disposable` instance in `Activity` instance and trickle it down to `ViewHolder`s for their use. This way, we can match the lifetime of `Disposable` and `Activity.
 
-```
+MainActivity:
+
+```kotlin
 class MainActivity : AppCompatActivity() {
 +   val disposable = CompositeDisposable()
  
@@ -168,9 +205,9 @@ class MainActivity : AppCompatActivity() {
 +   }
 ```
 
-Change in MainActivityFragment: 
+MainActivityFragment: 
 
-```
+```kotlin
 class MainActivityFragment : Fragment() {
  
 -   val adapter = MainRecyclerViewAdapter()
@@ -185,8 +222,9 @@ class MainActivityFragment : Fragment() {
     ...
 ```
 
-Change in MainRecyclerViewAdapter: 
-``` 
+MainRecyclerViewAdapter: 
+
+```kotlin
 -class MainRecyclerViewAdapter: RecyclerView.Adapter<MainRecyclerViewHolder>() {
 +class MainRecyclerViewAdapter(val activityDisposable: CompositeDisposable) : RecyclerView.Adapter<MainRecyclerViewHolder>() {
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MainRecyclerViewHolder {
@@ -197,9 +235,9 @@ Change in MainRecyclerViewAdapter:
     ...
 ``` 
  
- Change in MainRecyclerViewHolder:
+MainRecyclerViewHolder:
 
-```
+```kotlin
 -class MainRecyclerViewHolder(itemView: View): RecyclerView.ViewHolder(itemView) {
 +class MainRecyclerViewHolder(itemView: View, val activityDisposable: CompositeDisposable): RecyclerView.ViewHolder(itemView) {
     val disposable = CompositeDisposable()
@@ -214,18 +252,27 @@ Change in MainRecyclerViewAdapter:
 }
 ```
 
-Solution 2 is good under the assumption that `ViewHolder`'s lifetime is the same as `Activity`'s. If there is a situation where `ViewHolder` is alive after `Activity` is destroyed (e.g., Soft keyboard coming up?), then we are doomed with this solution. If there is a situation where `ViewHolder` is reclaimed before `Activity` is destroyed (e.g., You switch `Fragment` dynamically inside the same `Activity`), then we are doomed with this solution too.
+This solution is perfect __in situation where the lifetime of `ViewHolder` and `Activity` should match.__
 
-### Summary 
+However, if there is a possibility that __`Viewholder` instance outlives `Activity` instance, this solution breaks__. After `Activity` is dead, there will be `ViewHolder`s who cannot receive Rx events. Having said that, I don't come up with any situation that would cause this situation. (i.e., `ViewHolder` to outlive `Activity`)
 
-If the application doesn't involve Soft Keyboard on that screen, and if the application keeps the `Fragment` of the `RecyclerView` for the lifetime of `Activity`, then we should use Solution 2. If the application switches the `Fragment` of the `RecyclerView` inside the `Activity`, you can use Solution 1 to compensate for Solution 2. Otherwise, we should not use Rx in the `ViewHolder`. That's my conclusion for this case.
+On the other hand, if a __`ViewHolder` instance is detached from the window while an `Activity` instance is alive, detached `ViewHolder` could keep receiving Rx events__. This scenario is more realistic. If you have multiple `Fragment`s in the `Activity` and if you are switching the `Fragment`s with `ViewPager`, a `RecyclerView` and its `ViewHolder`s on one `Fragment` could be detached from the window when another `Fragment` is displayed. In this case, __you can trickle down `Disposable`s from the `Fragment` instead of the `Activity`, because you want to match the lifetime of the `ViewHolder` to that of the `Fragment`__.
 
-## Overall Summary
+### Summary of case 2
 
-- The sample provides the solution when `Activity` is leaking due to `RecyclerView.Adapter`'s lifetime being longer than the `Activity`. 
-- The sample provides the solution under restricted conditions and thought about the case where `Activity` leaks due to the usage of Rx in `RecyclerView.ViewHolder`.
+I think the solution 2 can handle all of the cases. You will need to choose whether to match the `ViewHolder`'s lifetime to `Activity` or `Fragment`, but that's it.
 
-Although I wasn't aware, LeakCanary tells me that there is a hidden reference like this from `RecyclerView.Adapter`/`RecyclerView.ViewHolder` to `Activity`.
+I don't come up with a situation where `ViewHolder` instance can outlive parent `Activity`/`Fragment` instance, but if you have any idea, I would be pleased to receive a comment.
 
-![Hidden references from RecyclerView => Activity](docs/images/Structure-actual.png)
+My lament is that our life would be so much easier if `ViewHolder` itself had a life cycle callback like `onDestroy`...
 
+## Summary
+
+- Memory leak can happen when `RecyclerView.Adapter` outlives `Activity`. But there is a solution for that!
+- Memory leak can happen when you use Rx in `RecyclerView.ViewHolder`. But there is a solution for that!
+
+I totally didn't have that in my mental model, but according to LeakCanary's reference path, __`RecyclerView.Adapter`/`RecyclerView.Viewholder` has indirect reference to parent `Activity`. (Even when you placed `RecyclerView` on top of a `Fragment`)__.
+
+![Actual Structure](Resources/Structure-actual.png)
+
+Bye bye memory leaks. Long live LeakCanary!!
