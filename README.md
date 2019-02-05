@@ -3,20 +3,20 @@
 ![twitter](https://img.shields.io/badge/twitter-@yfujiki-blue.svg)
 
 ## Preface
-This article is mostly meant for novis to mid level Android programmers, who haven't really digged into [LeakCanary](https://github.com/square/leakcanary) yet. I myself used it for the first time recently after delving into Android development for a year. And I am pleasently surprised how powerful this tool is. This is definitely a must-include tool in every project. At the same time, I was how Android maintains references under the hood for RecyclerViews. With naive expectation that RecyclerView itself should be avoiding circular references, you can easily fall into a trap of memory leaks. (And that's exactly the kind of reason that Square guys implemented [LeakCanary](https://github.com/square/leakcanary) and everybody should use it)
+This article is mostly meant for novis to mid level Android programmers, who haven't really digged into [LeakCanary](https://github.com/square/leakcanary) yet. I myself used it for the first time recently after delving into Android development for a year. And I am pleasantly surprised how powerful this tool is. This is definitely a must-include tool in every project. At the same time, I was surprised how Android maintains references under the hood for `RecyclerViews`. With naive expectation that `RecyclerView` itself should avoid circular references, you can easily fall into a trap of memory leaks. (And that's exactly the kind of reason that Square guys implemented [LeakCanary](https://github.com/square/leakcanary) and everybody should use it)
 
 ## How to use LeakCanary
-It's pretty simple to use LeakCanary. As instructed in the [README](https://github.com/square/leakcanary#getting-started), you just need to describe dependency in gradle and write a few lines in your `Application` subclass. And as it also describes, LeakCanary will alert you of the memory leak in your __debug build only__.
+It's pretty simple to use LeakCanary. As instructed in the [README section](https://github.com/square/leakcanary#getting-started), you just need to **1. describe dependency in gradle** and **2. write a few lines in your `Application` subclass**. And then LeakCanary will alert you of the memory leak in your __debug build__.
 
-However, as straight-forward as it sounds, there was one pitfall I got into. If you are like me and prefers to press _Debug_ button instead of _Run_ button on Android Studio, LeakCanary doesn't run while you are debugging. You have to stop the debugging, and start the installed debug build from the launcher.
+However, as straight-forward as it sounds, there was one pitfall I got into. If you are like me and prefers to press _Debug_ button instead of _Run_ button on Android Studio, **LeakCanary doesn't run while you are debugging**. You have to stop the debugging, and start the installed debug build from the launcher.
 
-I have summarized this flow into a video, if it helps :
+I have summarized this flow into a video, if this helps :
 
 [![How to use LeakCanary](http://img.youtube.com/vi/RiYGSjguI9k/0.jpg)](http://www.youtube.com/watch?v=RiYGSjguI9k "How to use LeakCanary ((after you have finished implementation)")
 
 ## Two cases you can easily make memory leak around RecyclerView
 
-I have put two cases of memory leaks I encountered into a [sample program](https://github.com/yfujiki/RecyclerViewMemoryLeak). All codes are written in Kotlin.
+I have put two cases of memory leaks I encountered into this sample program. All codes are written in Kotlin.
 
 ### Case 1: `RecyclerView.adapter` outlives `Activity`.
 
@@ -25,21 +25,23 @@ This sample program follows very standard structure as follows.
 
 ![Structure.png](./Resources/Structure.png)
 
-`Fragment` shows `RecyclerView` and it's `adapter` provides custom `Viewholder`s. One thing that deviates standard(!?) structure is that the `Fragment` keeps reference to the `adapter` of the `RecyclerView`. This reference is meant to reuse `adapter` even after `Activity` is refreshed due to rotation etc. We are showing `RecyclerView` on top of the `Fragment`, so I think it is a sensible option to match the lifetime of `RecyclerView`'s `adapter` to the one of the `Fragment` as well.
+`Fragment` shows `RecyclerView` and it's `adapter` provides custom `Viewholder`s. One thing that deviates from standard(!?) structure is that the `Fragment` keeps reference to the `adapter`. This reference is meant to reuse `adapter` even after `Activity` is refreshed due to rotation etc. We are showing `RecyclerView` on top of the `Fragment`, so I think it is a sensible option to match the lifetime of `RecyclerView`'s `adapter` to the one of the `Fragment`.
 
-This structure looks safe in the perspective of memory leak because there is no circular references. However, it causes a memory leak indeed.
+This structure looks memory leak safe because there is no circular references. However, the expectation is false and LeakCanary detects that.
 
-The object reference path provided by [LeakCanary](https://github.com/square/leakcanary) will look like this.
+The object reference path provided by [LeakCanary](https://github.com/square/leakcanary) looks like this.
 
 ![Adapter.png](https://qiita-image-store.s3.amazonaws.com/0/108030/343ca8a3-ed73-f31e-d21b-a419d9100872.png)
 
-To my surprise, this diagram tells me that `RecyclerView.mAdapter` holds an indirect reference to `MainActivity` through `RecyclerView.mContext`. This is not a reference we made ourselves. This is a "hidden" reference, if we may call it. 
+To my surprise, this diagram tells me that `RecyclerView.mAdapter` holds an indirect reference to `MainActivity` through `RecyclerView.mContext`. This is not a reference we made ourselves. This is a "hidden" reference, if we may call it.
 
 So, the actual structure with this "hidden" reference (indicated by the dashed lines) is like the next diagram.
 
 ![structure-actual-for-adapter.png](Resources/structure-actual-for-adapter.png)
 
 You can see there is a beautiful circular reference from `MainFragment` => `MainRecyclerViewAdapter` => `RecyclerView` => `MainActivity` => `MainFragment` and so on... Rotation happens, and `MainActivity` gets recreated, but since `MainFragment` still lives after rotation and keeps indirect reference to the old `MainActivity`, the old `MainActivity` will never reclaimed by GC and leaks.
+
+As a side note, the `RecyclerView` is always recreated after rotation and reference from `MainFragment` to the old `RecyclerView` through Android-Kotlin extension never stays after rotation (indicated by the red cross in the diagram). That's how Android works.
 
 #### Solution 1
 
@@ -71,8 +73,6 @@ Every time when rotation happens, you will ditch `adapter` that holds an indirec
 In terms of structure, we don't have the circular reference we had before, because there is no link from `Fragment` to `adapter` now. 
 
 ![structure-after-removing-adapter.png](Resources/structure-after-removing-adapter-reference.png)
-
-(You may think there still is a circular reference from `MainActivity` => `MainFragment` => `RecyclerView` => `MainActivity`. However, the `RecyclerView` is always recreated after rotation and reference from `MainFragment` to the old `RecyclerView` through Android-Kotlin extension never stays after rotation. That's how the Android works.)
 
 The cons of this approach is that you cannot save the temporary state in the `adapter`, because the `adapter` is initialized at every rotation. We have to save the temporary state somewhere else, and let the `adapter` to fetch the state after every initialization.
 
@@ -106,7 +106,7 @@ class MainActivityFragment : Fragment() {
 }
 ```
 
-I need to read Android code for detail, but I imagine that when you set `RecyclerView.adapter = null`, Android nulls out the reference from `adapter` to the `RecyclerView` as well, thereby eliminating the circular reference.
+Actually, I was surprised that this approach works. Even if you null out the reference from `RecyclerView` to `adapter`, as long as the `adapter` has a reference to `RecyclerView`, you still have circular reference. The only way I can comprehend this is that Android nulls out the reference from `adapter` to the `RecyclerView` as well when you null out the reverse relationship, thereby eliminating the circular reference.
 
 ![structure-after-nullouting-adapter.png](Resources/structure-after-nullouting-adapter.png)
 
